@@ -36,6 +36,7 @@ COMPILER ?=  $(shell $(CASEROOT)/xmlquery --caseroot $(CASEROOT) COMPILER --valu
 MPILIB ?= $(shell $(CASEROOT)/xmlquery --caseroot $(CASEROOT) MPILIB --value)
 OS ?= $(shell $(CASEROOT)/xmlquery --caseroot $(CASEROOT) OS --value)
 CASETOOLS ?= $(CASEROOT)/Tools
+SRCROOT ?= $(shell $(CASEROOT)/xmlquery --caseroot $(CASEROOT) SRCROOT --value)
 
 # Determine whether to compile threaded or not
 ifeq ($(strip $(BUILD_THREADED)),TRUE)
@@ -271,9 +272,11 @@ touch_filepath:
 # Get list of files and build dependency file for all .o files
 #   using perl scripts mkSrcfiles and mkDepends
 # if a source is of form .F90.in strip the .in before creating the list of objects
-# SOCRATES
-SOCRATESPATH := /glade/work/jet/collections/CESM-planets/libraries/SOCRATES/socrates_distro
+# below we use a subset of SOCRATES sources for cam libsocrates.a
+# if you want to use the runes driver interface add the appropriate files to
+# SOURCES - look in Depends to see what additional files will be needed.
 
+SOCRATESPATH := $(SRCROOT)/libraries/SOCRATES/socrates_distro
 include $(SOCRATESPATH)/make/Mk_mod_gencore
 include $(SOCRATESPATH)/make/Mk_src_gencore
 include $(SOCRATESPATH)/make/Mk_src_radcore
