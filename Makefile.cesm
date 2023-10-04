@@ -1,0 +1,392 @@
+#===============================================================================
+#
+# socrates Makefile for cesm-planets
+#
+#===============================================================================
+
+# Set up special characters
+null  :=
+comma := ,
+
+# Load dependency search path.
+dirs := .
+dirs += $(shell cat Filepath)
+
+cpp_dirs := $(dirs)
+# Add INCROOT to path for Depends and Include
+MINCROOT :=
+ifdef INCROOT
+  cpp_dirs += $(INCROOT)
+  MINCROOT := $(INCROOT)
+endif
+
+# Expand any tildes in directory names. Change spaces to colons.
+VPATH := $(foreach dir,$(cpp_dirs),$(wildcard $(dir)))
+VPATH := $(subst $(space),:,$(VPATH))
+
+RM    := rm
+CP    := cp
+
+complib: $(COMPLIB)  Depends
+
+BUILD_THREADED ?= $(shell $(CASEROOT)/xmlquery --caseroot $(CASEROOT) BUILD_THREADED --value)
+LIBROOT ?= $(shell $(CASEROOT)/xmlquery --caseroot $(CASEROOT) BUILD_THREADED --value)
+SHAREDLIBROOT ?= $(shell $(CASEROOT)/xmlquery --caseroot $(CASEROOT) SHAREDLIBROOT --value)
+COMPILER ?=  $(shell $(CASEROOT)/xmlquery --caseroot $(CASEROOT) COMPILER --value)
+MPILIB ?= $(shell $(CASEROOT)/xmlquery --caseroot $(CASEROOT) MPILIB --value)
+OS ?= $(shell $(CASEROOT)/xmlquery --caseroot $(CASEROOT) OS --value)
+CASETOOLS ?= $(CASEROOT)/Tools
+
+# Determine whether to compile threaded or not
+ifeq ($(strip $(BUILD_THREADED)),TRUE)
+      THREADDIR = threads
+      compile_threaded = true
+else
+      THREADDIR = nothreads
+      compile_threaded = false
+endif
+
+# set the debug directory based on the debug status
+ifeq ($(strip $(DEBUG)),TRUE)
+   DEBUGDIR = debug
+else
+   DEBUGDIR = nodebug
+endif
+
+USE_CXX = false
+
+ifndef MOD_SUFFIX
+   MOD_SUFFIX := mod
+endif
+
+#===============================================================================
+# set CPP options (must use this before any flags or cflags settings)
+#===============================================================================
+
+CPPDEFS := $(USER_CPPDEFS) -D$(OS) -Duse_libMPI -Duse_netCDF -Duse_LARGEFILE -DSPMD -D__IFC
+
+# Unless DEBUG mode is enabled, use NDEBUG to turn off assert statements.
+ifneq ($(strip $(DEBUG)),TRUE)
+   CPPDEFS += -DNDEBUG
+endif
+
+ifeq ($(strip $(MPILIB)),mpi-serial)
+  CPPDEFS += -DNO_MPI2
+else
+  CPPDEFS += -DHAVE_MPI
+endif
+
+ifeq (,$(SHAREDPATH))
+  SHAREDPATH = $(COMPILER)/$(MPILIB)/$(DEBUGDIR)/$(THREADDIR)/$(COMP_INTERFACE)
+  INSTALL_SHAREDPATH = $(EXEROOT)/$(SHAREDPATH)
+endif
+
+include $(CASEROOT)/Macros.make
+
+# autopromotion needed for SOCRATES 
+FFLAGS += $(FC_AUTO_R8)
+
+# Additional GNU flags needed for SOCRATES
+ifeq ($(strip $(COMPILER)),gnu)
+  FFLAGS += -fcray-pointer -fdefault-double-8
+  # also, below we inhibit all GNU compiler warnings for SOCRATES because (1) we have no control
+  # over SOCRATES, and (2) some GNU warning msgs contain characters that require encoding/decoding.
+  FFLAGS += -w
+  CFLAGS += -w
+endif
+
+# Disable the check for unallocated allocatable objects for SOCRATES
+ifeq ($(strip $(DEBUG)),TRUE)
+  ifeq ($(strip $(COMPILER)),intel)
+    FFLAGS += -check nopointer
+  endif
+endif
+
+# Use this if LD has not already been defined.
+ifeq ($(origin LD), default)
+  ifeq ($(strip $(MPILIB)),mpi-serial)
+    LD := $(SFC)
+  else
+    LD := $(MPIFC)
+  endif
+endif
+
+ifeq ($(USE_CXX), true)
+  ifeq ($(SUPPORTS_CXX), FALSE)
+    $(error Fatal attempt to include C++ code on a compiler/machine combo that has not been set up to support C++)
+  endif
+endif
+
+# Not clear how to escape commas for libraries with their own configure
+# script, and they don't need this defined anyway, so leave this out of
+# FPPDEFS.
+ifeq ($(HAS_F2008_CONTIGUOUS),TRUE)
+  CONTIGUOUS_FLAG := -DUSE_CONTIGUOUS=contiguous,
+else
+  CONTIGUOUS_FLAG := -DUSE_CONTIGUOUS=
+endif
+
+ifdef CPRE
+  CONTIGUOUS_FLAG := $(subst $(comma),\\$(comma),$(CONTIGUOUS_FLAG))
+  CONTIGUOUS_FLAG := $(patsubst -D%,$(CPRE)%,$(CONTIGUOUS_FLAG))
+endif
+
+ifndef AR
+   AR := ar
+endif
+
+ifdef NETCDF_C_PATH
+  ifndef NETCDF_FORTRAN_PATH
+    $(error "NETCDF_C_PATH specified without NETCDF_FORTRAN_PATH")
+  endif
+  NETCDF_SEPARATE:=true
+  ifndef INC_NETCDF_C
+    INC_NETCDF_C:=$(NETCDF_C_PATH)/include
+  endif
+  ifndef INC_NETCDF_FORTRAN
+    INC_NETCDF_FORTRAN:=$(NETCDF_FORTRAN_PATH)/include
+  endif
+  ifndef LIB_NETCDF_C
+    LIB_NETCDF_C:=$(NETCDF_C_PATH)/lib
+  endif
+  ifndef LIB_NETCDF_FORTRAN
+    LIB_NETCDF_FORTRAN:=$(NETCDF_C_PATH)/lib
+  endif
+ else ifdef NETCDF_FORTRAN_PATH
+  $(error "NETCDF_FORTRAN_PATH specified without NETCDF_C_PATH")
+ else ifdef NETCDF_PATH
+  NETCDF_SEPARATE:=false
+  ifndef INC_NETCDF
+    INC_NETCDF:=$(NETCDF_PATH)/include
+  endif
+  ifndef LIB_NETCDF
+    LIB_NETCDF:=$(NETCDF_PATH)/lib
+  endif
+else
+  # No Netcdf is an error unless target is clean or DEP
+  ifneq ($(MAKECMDGOALS), db_files)
+  ifneq ($(MAKECMDGOALS), db_flags)
+  ifeq (,$(findstring clean,$(MAKECMDGOALS)))
+      $(error NETCDF not found: Define NETCDF_PATH or NETCDF_C_PATH and NETCDF_FORTRAN_PATH in config_machines.xml or config_compilers.xml)
+  endif
+  endif
+  endif
+endif
+FFLAGS += -I$(INC_NETCDF)
+CFLAGS += -I$(INC_NETCDF)
+
+# Set HAVE_SLASHPROC on LINUX systems which are not bluegene or Darwin (OSx)
+
+ifeq ($(findstring -DLINUX,$(CPPDEFS)),-DLINUX)
+  ifneq ($(findstring DBG,$(CPPDEFS)),DBG)
+    ifneq ($(findstring Darwin,$(CPPDEFS)),Darwin)
+      CPPDEFS += -DHAVE_SLASHPROC
+    endif
+  endif
+endif
+
+ifdef CPRE
+  FPPDEFS := $(subst $(comma),\\$(comma),$(CPPDEFS))
+  FPPDEFS := $(patsubst -D%,$(CPRE)%,$(FPPDEFS))
+  EXTRA_PIO_FPPDEFS := $(subst $(comma),\\$(comma),$(EXTRA_PIO_CPPDEFS))
+  EXTRA_PIO_FPPDEFS := $(patsubst -D%,$(CPRE)%,$(EXTRA_PIO_FPPDEFS))
+else
+  FPPDEFS := $(CPPDEFS)
+  EXTRA_PIO_FPPDEFS := $(EXTRA_PIO_CPPDEFS)
+endif
+
+#===============================================================================
+# User-specified INCLDIR
+#===============================================================================
+
+INCLDIR := -I.
+ifdef USER_INCLDIR
+  INCLDIR += $(USER_INCLDIR)
+endif
+
+#===============================================================================
+# MPI-serial library (part of MCT)
+#===============================================================================
+
+ifeq ($(strip $(MPILIB)), mpi-serial)
+  CC      := $(SCC)
+  FC      := $(SFC)
+  CXX     := $(SCXX)
+  MPIFC   := $(SFC)
+  MPICC   := $(SCC)
+  MPICXX  := $(SCXX)
+  CONFIG_ARGS += MCT_PATH=$(SHAREDLIBROOT)/$(SHAREDPATH)/mct/mpi-serial
+else
+  CC  := $(MPICC)
+  FC  := $(MPIFC)
+  CXX := $(MPICXX)
+  ifdef MPI_PATH
+    INC_MPI := $(MPI_PATH)/include
+    LIB_MPI := $(MPI_PATH)/lib
+  endif
+endif
+
+ifeq ($(strip $(USE_ESMF_LIB)), TRUE)
+   ESMFDIR = esmf
+else
+   ESMFDIR = noesmf
+endif
+
+# This is needed so that dependancies are found
+CSM_SHR_INCLUDE:=$(INSTALL_SHAREDPATH)/$(COMP_INTERFACE)/$(ESMFDIR)/$(NINST_VALUE)/include
+INCLDIR += -I$(CSM_SHR_INCLUDE)
+
+FFLAGS += $(FPPDEFS)
+FFLAGS_NOOPT += $(FPPDEFS)
+
+# System libraries (netcdf, mpi, pnetcdf, esmf, trilinos, etc.)
+ifndef SLIBS
+  ifeq ($(NETCDF_SEPARATE), false)
+    SLIBS := -L$(LIB_NETCDF) -lnetcdff -lnetcdf
+  else ifeq ($(NETCDF_SEPARATE), true)
+    SLIBS := -L$(LIB_NETCDF_FORTRAN) -L$(LIB_NETCDF_C) -lnetcdff -lnetcdf
+  endif
+endif
+
+ifdef LIB_MPI
+   ifndef MPI_LIB_NAME
+      SLIBS += -L$(LIB_MPI) -lmpi
+   else
+      SLIBS += -L$(LIB_MPI) -l$(MPI_LIB_NAME)
+   endif
+endif
+
+# Machine stuff to appear last on the link step
+ifndef MLIBS
+     MLIBS  :=
+endif
+
+#-------------------------------------------------------------------------------
+# Build & include dependency files
+#-------------------------------------------------------------------------------
+
+touch_filepath:
+	touch Filepath
+
+# Get list of files and build dependency file for all .o files
+#   using perl scripts mkSrcfiles and mkDepends
+# if a source is of form .F90.in strip the .in before creating the list of objects
+# SOCRATES
+SOCRATESPATH := /glade/work/jet/collections/CESM-planets/libraries/SOCRATES
+
+include $(SOCRATESPATH)/make/Mk_mod_gencore
+include $(SOCRATESPATH)/make/Mk_src_gencore
+include $(SOCRATESPATH)/make/Mk_src_radcore
+
+SOURCES := \
+        $(MODULES_GENCORE:.f90=.F90) \
+        $(SOURCE90_GENCORE:.f90=.F90) \
+        $(SOURCE_RADCORE:.f90=.F90) \
+        def_planetstr.F90
+
+#SOURCES := $(shell cat Srcfiles)
+BASENAMES := $(basename $(basename $(SOURCES)))
+OBJS    := $(addsuffix .o, $(BASENAMES))
+INCS    := $(foreach dir,$(cpp_dirs),-I$(dir))
+
+CURDIR := $(shell pwd)
+
+Depends: Srcfiles Deppath
+	$(CASETOOLS)/mkDepends $(USER_MKDEPENDS_OPTS) Deppath Srcfiles > $@
+
+Deppath: Filepath
+	$(CP) -f Filepath $@
+	@echo "$(MINCROOT)" >> $@
+
+Srcfiles: Filepath
+	$(CASETOOLS)/mkSrcfiles
+
+Filepath:
+	@echo "$(VPATH)" > $@
+
+
+#-------------------------------------------------------------------------------
+# echo file names, paths, compile flags, etc. used during build
+#-------------------------------------------------------------------------------
+
+db_files:
+	@echo " "
+	@echo "* MACFILE := $(MACFILE)"
+	@echo "* VPATH   := $(VPATH)"
+	@echo "* INCS    := $(INCS)"
+	@echo "* OBJS    := $(OBJS)"
+db_flags:
+	@echo " "
+	@echo "* cc      := $(CC)  $(CFLAGS) $(INCS) $(INCLDIR)"
+	@echo "* .F.o    := $(FC)  $(FFLAGS) $(FIXEDFLAGS) $(INCS) $(INCLDIR)"
+	@echo "* .F90.o  := $(FC)  $(FFLAGS) $(FREEFLAGS) $(INCS) $(INCLDIR)"
+	ifeq ($(USE_CXX), true)
+	  @echo "* .cpp.o  := $(CXX) $(CXXFLAGS) $(INCS) $(INCLDIR)"
+	endif
+
+#-------------------------------------------------------------------------------
+# Rules used for the tests run by "configure -test"
+#-------------------------------------------------------------------------------
+
+test_fc: test_fc.o
+	$(LD) -o $@ test_fc.o $(LDFLAGS)
+ifeq ($(NETCDF_SEPARATE), false)
+test_nc: test_nc.o
+	$(LD) -o $@ test_nc.o -L$(LIB_NETCDF) -lnetcdff -lnetcdf $(LDFLAGS)
+else ifeq ($(NETCDF_SEPARATE), true)
+test_nc: test_nc.o
+	$(LD) -o $@ test_nc.o -L$(LIB_NETCDF_FORTRAN) -L$(LIB_NETCDF_C) -lnetcdff -lnetcdf $(LDFLAGS)
+endif
+test_mpi: test_mpi.o
+	$(LD) -o $@ test_mpi.o $(LDFLAGS)
+test_esmf: test_esmf.o
+	$(LD) -o $@ test_esmf.o $(LDFLAGS)
+
+#-------------------------------------------------------------------------------
+# build rules:
+#-------------------------------------------------------------------------------
+
+.SUFFIXES:
+.SUFFIXES: .F90 .F .f90 .f .c .cpp .o .in
+
+ifeq ($(MPILIB),mpi-serial)
+  MPISERIAL = $(INSTALL_SHAREDPATH)/lib/libmpi-serial.a
+  MLIBS += $(MPISERIAL)
+endif
+
+ifdef INCLUDE_DIR
+  $(COMPLIB): $(OBJS)
+	$(AR) -r $(COMPLIB) $(OBJS)
+	$(CP) *.$(MOD_SUFFIX) *.h $(INCLUDE_DIR)
+else
+  $(COMPLIB): $(OBJS)
+	$(AR) -r $(COMPLIB) $(OBJS)
+endif
+
+.c.o:
+	$(CC) -c $(INCLDIR) $(INCS) $(CFLAGS) $(CPPDEFS) $<
+.F.o:
+	$(FC) -c $(INCLDIR) $(INCS) $(FFLAGS) $(FIXEDFLAGS) $<
+.f.o:
+	$(FC) -c $(INCLDIR) $(INCS) $(FFLAGS) $(FIXEDFLAGS) $<
+.f90.o:
+	$(FC) -c $(INCLDIR) $(INCS) $(FFLAGS) $(FREEFLAGS)  $<
+.F90.o:
+	$(FC) -c $(INCLDIR) $(INCS) $(FFLAGS) $(FREEFLAGS) $(CONTIGUOUS_FLAG) $<
+.cpp.o:
+	$(CXX) -c $(INCLDIR) $(INCS) $(CXXFLAGS)  $<
+
+%.F90: %.F90.in
+	$(CIMEROOT)/src/externals/genf90/genf90.pl $< > $@
+
+clean: 
+	$(RM) $(EXEROOT)/SOCRATES
+
+# the if-tests prevent DEPS files from being created when they're not needed
+ifneq ($(MAKECMDGOALS), db_files)
+ifneq ($(MAKECMDGOALS), db_flags)
+ifeq (,$(findstring clean,$(MAKECMDGOALS)))
+    -include Depends $(CASEROOT)/Depends.$(COMPILER) $(CASEROOT)/Depends.$(MACH) $(CASEROOT)/Depends.$(MACH).$(COMPILER)
+endif
+endif
+endif
