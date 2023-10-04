@@ -272,7 +272,7 @@ touch_filepath:
 #   using perl scripts mkSrcfiles and mkDepends
 # if a source is of form .F90.in strip the .in before creating the list of objects
 # SOCRATES
-SOCRATESPATH := /glade/work/jet/collections/CESM-planets/libraries/SOCRATES
+SOCRATESPATH := /glade/work/jet/collections/CESM-planets/libraries/SOCRATES/socrates_distro
 
 include $(SOCRATESPATH)/make/Mk_mod_gencore
 include $(SOCRATESPATH)/make/Mk_src_gencore

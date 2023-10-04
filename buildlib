@@ -61,7 +61,7 @@ def buildlib(bldroot, installpath, case):
     filepath = []
     # put cam_interface directory at head of Filepath to use CAM interface versions of the SOCRATES files.
     filepath.append(os.path.join(socrates_dir,"cam_interface"))
-    for _dir in glob.iglob(os.path.join(socrates_dir,"src","*")):
+    for _dir in glob.iglob(os.path.join(socrates_dir,"socrates_distro","src","*")):
         if os.path.isdir(_dir) and not "cime_config" in _dir:
             filepath.append(os.path.join(socrates_dir, _dir))
     with open(os.path.join(installpath,"Filepath"), "w") as fd:
@@ -72,7 +72,7 @@ def buildlib(bldroot, installpath, case):
     gmake_opts = "-d -f {} ".format(os.path.join(socrates_dir,"Makefile.cesm"))
     gmake_opts += " -C {} ".format(installpath)
     gmake_opts += "CASEROOT={} ".format(caseroot)
-    gmake_opts += "USER_INCLDIR=\"-I{} -I{} \"".format(os.path.join(socrates_dir,cam_interface"),
+    gmake_opts += "USER_INCLDIR=\"-I{} -I{} \"".format(os.path.join(socrates_dir,"cam_interface"),
                                                            os.path.join(bldroot,"SOCRATES") )
 
     gmake_opts += " COMPLIB=libsocrates.a "
