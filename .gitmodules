@@ -1,0 +1,6 @@
+[submodule "socrates_distro"]
+	path = socrates_distro
+	url = https://github.com/NCAR/SOCRATES
+        fxrequired = AlwaysRequired
+        fxtag = socrates_2304.001
+	fxDONOTUSEurl = https://github.com/NCAR/SOCRATES
